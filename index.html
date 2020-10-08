@@ -1,6 +1,7 @@
 <html>
 <body onload="startGame()">
-Calibration: <input type="number" value="-60" max="150" min="-150" step="10" onchange="calibchange()" id='calibInput'>
+Calibration: <input type="number" value="-60" max="150" min="-150" step="10" onchange="calibchange()" id='calibInput'></input>
+<input type="button" value="Restart (buggy)" onclick="restart()"></input>
 <canvas id="gameCanvas"></canvas>
 <iframe width="100%" height="100" scale='0.5' scrolling="no" frameborder="no" allow="autoplay" id="musicplayer"></iframe>
 </body>
@@ -90,7 +91,7 @@ player.customFrame = function() {
 					this.invincible = true;
 					this.redPlanet.color = '#f88';
 					if(this.redPlanet.life>0)
-						this.trailR[3-this.redPlanet.life].destroy();
+						this.trailR[3-this.redPlanet.life].color = '#0000';
 					this.redPlanet.life--;
 					setTimeout(function() {
 						player.invincible = false;
@@ -103,7 +104,7 @@ player.customFrame = function() {
 					this.invincible = true;
 					this.bluePlanet.color = '#88f';
 					if(this.bluePlanet.life>0)
-						this.trailB[3-this.bluePlanet.life].destroy();
+						this.trailB[3-this.bluePlanet.life].color = '#0000';
 					this.bluePlanet.life--;
 					setTimeout(function() {
 						player.invincible = false;
@@ -458,6 +459,17 @@ function restart(){
 		attack.generated = false;
 	widget.seekTo(0);
 	widget.play()
+	destroy = Obj.OBJS.slice(10);
+	for(obj of destroy)
+		obj.destroy();
+	delete destroy;
+	gameTime = 0.;
+	player.redPlanet.life = 3;
+	player.bluePlanet.life = 3;
+	for(trail of player.trailR)
+		trail.color = '#aaa';
+	for(trail of player.trailB)
+		trail.color = '#aaa';
 }
 function calibchange(){
 	calib = document.getElementById('calibInput').value;
