@@ -1,0 +1,492 @@
+<html>
+<body onload="startGame()">
+Calibration: <input type="number" value="-60" max="150" min="-150" step="10" onchange="calibchange()" id='calibInput'>
+<canvas id="gameCanvas"></canvas>
+<iframe width="100%" height="100" scale='0.5' scrolling="no" frameborder="no" allow="autoplay" id="musicplayer"></iframe>
+</body>
+<script src="SCapi.js"></script>
+<script src="engine.js"></script>
+<script>
+gameArea.canvas = document.getElementById("gameCanvas");
+gameArea.frameRate = 20;
+var gameTime = 0.;
+var calib = -60.;
+var BPS = 164./60; // Beats per second
+var song = 'https://soundcloud.com/thefatrat/thefatrat-rise-up-1';
+song = song.substring(8);
+document.getElementById('musicplayer').setAttribute('src','https://w.soundcloud.com/player/?url=https%3A//' + song + '&color=%23ff5500&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&show_teaser=true');
+var iframeElement = document.querySelector('iframe');
+var widget = SC.Widget(iframeElement);
+
+grid = new Obj();
+grid.side = 50;
+grid.width = 750/grid.side;
+grid.height = 550/grid.side;
+grid.draw = function(){
+	let ctx = gameArea.context;
+	let width = gameArea.canvas.width;
+	let height = gameArea.canvas.height;
+	ctx.beginPath();
+	for(let x=0;x<=width;x+=this.side){
+		// Draws single line
+		ctx.moveTo(x,0);
+		ctx.lineTo(x,height);
+	}
+	for(let y=0;y<=height;y+=this.side){
+		ctx.moveTo(0,y);
+		ctx.lineTo(width,y);
+	}
+	ctx.stroke();
+}
+
+class Trail extends Circ {
+	constructor(r,queueLength){
+		super(r);
+		this.queueX = Array(queueLength).fill(0);
+		this.queueY = Array(queueLength).fill(0);
+		this.color = '#aaa';
+	}
+	customFrame() {
+		this.x = this.queueX.shift();
+		this.y = this.queueY.shift();
+		this.queueX.push(this.following.x);
+		this.queueY.push(this.following.y);
+	}
+}
+
+player = new Obj();
+player.posX = 7;
+player.posY = 5;
+player.currPlanet = true;
+player.trailR = [new Trail(4,8),new Trail(6,6),new Trail(8,4)];
+player.trailB = [new Trail(4,8),new Trail(6,6),new Trail(8,4)];
+player.redPlanet = new Circ(15);
+player.bluePlanet = new Circ(15);
+// Customizing
+player.redPlanet.color = '#f00';
+player.redPlanet.life = 3;
+player.bluePlanet.color = '#00f';
+player.bluePlanet.life = 3;
+player.invincible = false;
+for(trail of player.trailR)
+	trail.following = player.redPlanet;
+for(trail of player.trailB)
+	trail.following = player.bluePlanet;
+// Functions
+player.customFrame = function() {
+	var stillPlanet = this.currPlanet ? this.redPlanet : this.bluePlanet;
+	var movingPlanet = this.currPlanet ? this.bluePlanet : this.redPlanet;
+	this.angle = (gameTime*BPS/1000 + !this.currPlanet) %2;
+	stillPlanet.x = (this.posX + .5)*grid.side;
+	stillPlanet.y = (this.posY + .5)*grid.side;
+	movingPlanet.x = (this.posX + .5 + Math.cos(this.angle*Math.PI))*grid.side;
+	movingPlanet.y = (this.posY + .5 + Math.sin(this.angle*Math.PI))*grid.side;
+	
+	// Check hit
+	if(!this.invincible)
+		for(obj of Obj.OBJS){
+			if(obj.hostile){
+				if(obj.collision(this.redPlanet.x,this.redPlanet.y)){
+					this.invincible = true;
+					this.redPlanet.color = '#f88';
+					if(this.redPlanet.life>0)
+						this.trailR[3-this.redPlanet.life].destroy();
+					this.redPlanet.life--;
+					setTimeout(function() {
+						player.invincible = false;
+						player.redPlanet.color = '#f00';
+					},3000);
+					console.log('red hit');
+					break;
+				}
+				if(obj.collision(this.bluePlanet.x,this.bluePlanet.y)){
+					this.invincible = true;
+					this.bluePlanet.color = '#88f';
+					if(this.bluePlanet.life>0)
+						this.trailB[3-this.bluePlanet.life].destroy();
+					this.bluePlanet.life--;
+					setTimeout(function() {
+						player.invincible = false;
+						player.bluePlanet.color = '#00f';
+					},3000);
+					console.log('blue hit');
+					break;
+				}
+			}
+		}
+}
+
+class Attack {
+	static Attacks = [];
+	constructor(time){
+		this.time = time;
+		this.generated = false;
+		Attack.Attacks.push(this);
+	}
+	generate() {
+		
+	}
+}
+class VerticalBeam extends Attack {
+	constructor(time,x,width=grid.side) {
+		super(time);
+		this.x = x;
+		this.width = width;
+		this.helperTime = 6/BPS; // 6 beats
+	}
+	generate() {
+		this.helper = new Rect(this.width,gameArea.canvas.height);
+		this.helper.x = this.x;
+		this.helper.y = gameArea.canvas.height/2;
+		this.helper.time = this.time;
+		this.helper.helperTime = this.helperTime;
+		this.helper.customFrame = function() {
+			let time = (gameTime - this.time)/1000;
+			let alpha = 100 * Easing.outSine(time/this.helperTime);
+			this.color = '#000000' + (alpha<16?'0':'') + parseInt(alpha).toString(16);
+			if(time > this.helperTime)
+				this.destroy();
+		};
+		
+		this.beam = new Rect(this.width,gameArea.canvas.height);
+		this.beam.x = this.x;
+		this.beam.y = -gameArea.canvas.height/2;
+		this.beam.hostile = true;
+		this.beam.time = this.time;
+		this.beam.helperTime = this.helperTime;
+		this.beam.key = 1;
+		this.beam.events = [
+			{t:0, y:-gameArea.canvas.height/2, ease:null},
+			{t:this.helperTime, y:-gameArea.canvas.height/2 + 0.5*grid.side, ease:Easing.outSine},
+			{t:this.helperTime+.1, y:gameArea.canvas.height/2, ease:Easing.line},
+			{t:this.helperTime+1/BPS, y:gameArea.canvas.height/2, ease:Easing.line},
+			{t:this.helperTime+1/BPS+.2, y:-gameArea.canvas.height/2, ease:Easing.line},
+		]
+		this.beam.customFrame = function() {
+			let time = (gameTime - this.time)/1000;
+			if(time > this.events[this.key].t){
+				this.key++;
+				if(this.key == this.events.length){
+					this.destroy();
+					return;
+				}
+			}
+			let ev1 = this.events[this.key];
+			let ev0 = this.events[this.key-1];
+			let dt = ev1.t - ev0.t;
+			let dy = ev1.y - ev0.y;
+			this.y = ev0.y + dy*ev1.ease((time-ev0.t)/dt);
+			
+		};
+	}
+}
+class HorizontalBeam extends Attack {
+	constructor(time,y,width=grid.side) {
+		super(time);
+		this.y = y;
+		this.width = width;
+		this.helperTime = 6/BPS; // 6 beats
+	}
+	generate() {
+		this.helper = new Rect(gameArea.canvas.width,this.width);
+		this.helper.y = this.y;
+		this.helper.x = gameArea.canvas.width/2;
+		this.helper.time = this.time;
+		this.helper.helperTime = this.helperTime;
+		this.helper.customFrame = function() {
+			let time = (gameTime - this.time)/1000;
+			let alpha = 100 * Easing.outSine(time/this.helperTime);
+			this.color = '#000000' + (alpha<16?'0':'') + parseInt(alpha).toString(16);
+			if(time > this.helperTime)
+				this.destroy();
+		};
+		
+		this.beam = new Rect(gameArea.canvas.width,this.width);
+		this.beam.y = this.y;
+		this.beam.x = -gameArea.canvas.width/2;
+		this.beam.hostile = true;
+		this.beam.time = this.time;
+		this.beam.helperTime = this.helperTime;
+		this.beam.key = 1;
+		this.beam.events = [
+			{t:0, x:-gameArea.canvas.width/2, ease:null},
+			{t:this.helperTime, x:-gameArea.canvas.width/2 + 0.5*grid.side, ease:Easing.outSine},
+			{t:this.helperTime+.1, x:gameArea.canvas.width/2, ease:Easing.line},
+			{t:this.helperTime+1/BPS, x:gameArea.canvas.width/2, ease:Easing.line},
+			{t:this.helperTime+1/BPS+.2, x:-gameArea.canvas.width/2, ease:Easing.line},
+		]
+		this.beam.customFrame = function() {
+			let time = (gameTime - this.time)/1000;
+			if(time > this.events[this.key].t){
+				this.key++;
+				if(this.key == this.events.length){
+					this.destroy();
+					return;
+				}
+			}
+			let ev1 = this.events[this.key];
+			let ev0 = this.events[this.key-1];
+			let dt = ev1.t - ev0.t;
+			let dx = ev1.x - ev0.x;
+			this.x = ev0.x + dx*ev1.ease((time-ev0.t)/dt);
+			
+		};
+	}
+}
+class SquareAttack extends Attack {
+	constructor(time,x){
+		super(time);
+		this.x = x
+		this.side = 50;
+	}
+	generate() {
+		this.sq = new Rect(this.side,this.side);
+		this.sq.hostile = true;
+		this.sq.x = this.x;
+		this.sq.time = this.time;
+		this.sq.customFrame = function() {
+			let time = gameTime - this.time;
+			this.y = gameArea.canvas.height + 50 - .15*time;
+			this.width *= .995;
+			this.height *= .995;
+			this.rot += 0.05;
+			if (this.y < -grid.side)
+				this.destroy();
+		}
+	}
+}
+
+class Bullet extends Rect {
+	constructor(dt,x1,y1,dx,dy){
+		super(20,20);
+		this.t1 = gameTime;
+		this.dt = dt;
+		this.x1 = x1;
+		this.y1 = y1;
+		this.dx = dx;
+		this.dy = dy;
+		this.hostile = true;
+	}
+	customFrame(){
+		this.rot += 0.05;
+		let t = gameTime - this.t1;
+		this.x = this.x1 + this.dx*t/this.dt;
+		this.y = this.y1 + this.dy*t/this.dt;
+		if(t>this.dt)
+			this.destroy();
+	}
+}
+
+class Bomb extends Attack {
+	constructor(time,x,y) {
+		super(time);
+		this.x = x;
+		this.y = y;
+		this.helperTime = 6/BPS;
+	}
+	generate() {
+		this.helper = new Circ(0);
+		this.helper.x = this.x;
+		this.helper.y = this.y;
+		this.helper.time = this.time;
+		this.helper.helperTime = this.helperTime;
+		this.helper.customFrame = function() {
+			let time = (gameTime - this.time)/1000;
+			let a = Easing.outSine(time/this.helperTime);
+			let alpha = 100 * a;
+			this.color = '#000000' + (alpha<16?'0':'') + parseInt(alpha).toString(16);
+			this.radius = 35 * a;
+			if(time > this.helperTime)
+				this.destroy();
+		};
+		
+		this.bomb = new Circ(0);
+		this.bomb.x = this.x;
+		this.bomb.y = this.y;
+		this.bomb.hostile = true;
+		this.bomb.time = this.time;
+		this.bomb.helperTime = this.helperTime;
+		this.bomb.customFrame = function() {
+			let time = (gameTime - this.time)/1000 - .75*this.helperTime;
+			if(time < 0)
+				return;
+			this.radius = 35 * Easing.outSine(time/this.helperTime/.25);
+			if(time > this.helperTime*.25){
+				let w = gameArea.canvas.width*1.3;
+				for(let i=0;i<8;i++)
+					new Bullet(3000,this.x,this.y,w*Math.cos(i*Math.PI/4),w*Math.sin(i*Math.PI/4));
+				this.destroy();
+			}
+		};
+	}
+}
+
+class RotatingBeam extends Attack {
+	constructor(time,dt,rot,drot) {
+		super(time);
+		this.dt = dt; // Must be bigger than helperTime
+		this.rot = rot;
+		this.drot = drot;
+		this.width = grid.side;
+		this.helperTime = 8/BPS;
+	}
+	generate() {
+		this.helper = new Rect(this.width,gameArea.canvas.width*1.3);
+		this.helper.x = gameArea.canvas.width/2;
+		this.helper.y = gameArea.canvas.height/2;
+		this.helper.time = this.time;
+		this.helper.helperTime = this.helperTime;
+		this.helper.orot = this.rot;
+		this.helper.drot = this.drot;
+		this.helper.dt = this.dt;
+		this.helper.customFrame = function() {
+			let time = (gameTime - this.time)/1000;
+			let alpha = 100 * Easing.outSine(time/this.helperTime);
+			this.rot = this.orot + this.drot * time/this.dt;
+			this.color = '#000000' + (alpha<16?'0':'') + parseInt(alpha).toString(16);
+			if(time > this.helperTime)
+				this.destroy();
+		};
+		this.beam = new Rect(this.width,gameArea.canvas.width*1.3);
+		this.beam.x = gameArea.canvas.width/2;
+		this.beam.y = gameArea.canvas.height/2;
+		this.beam.hostile = false;
+		this.beam.time = this.time;
+		this.beam.helperTime = this.helperTime;
+		this.beam.key = 1;
+		this.beam.orot = this.rot;
+		this.beam.drot = this.drot;
+		this.beam.dt = this.dt;
+		this.beam.events = [
+			{t:0, x:0., ease:null},
+			{t:this.helperTime, x:0., ease:Easing.line},
+			{t:this.helperTime+.1, x:gameArea.canvas.width*1.3, ease:Easing.line},
+			{t:this.dt, x:gameArea.canvas.width*1.3, ease:Easing.line},
+			{t:this.dt+.2, x:0, ease:Easing.line},
+		]
+		this.beam.customFrame = function() {
+			let time = (gameTime - this.time)/1000;
+			this.rot = this.orot + this.drot * time/this.dt;
+			if(time > this.events[this.key].t){
+				this.key++;
+				if(this.key == this.events.length){
+					this.destroy();
+					return;
+				}
+				if(this.key==2)
+					this.hostile = true;
+			}
+			let ev1 = this.events[this.key];
+			let ev0 = this.events[this.key-1];
+			let dt = ev1.t - ev0.t;
+			let dx = ev1.x - ev0.x;
+			this.height = ev0.x + dx*ev1.ease((time-ev0.t)/dt);
+			
+		};
+	}
+}
+
+customUpdate = function() {
+	widget.getPosition(pos=>(gameTime=pos+calib)); // Write game time in gameTime
+	for(attack of Attack.Attacks)
+		if(!attack.generated && gameTime >= attack.time){
+			attack.generate();
+			attack.generated = true;
+		}
+}
+
+var BEAT = 1000/BPS
+var OFFSET = 0.1;
+new VerticalBeam(16*BEAT-OFFSET,375,3*grid.side)
+new HorizontalBeam(32*BEAT-OFFSET,275,3*grid.side)
+for(let i=0;i<8;i++)
+	new VerticalBeam((36+4*i)*BEAT-OFFSET,50+50*Math.floor(14*Math.random()),2*grid.side);
+for(let i=0;i<28;i++)
+	new SquareAttack((71+2*i)*BEAT-OFFSET,25+50*14*Math.random());
+for(let i=0;i<8;i++)
+	new HorizontalBeam((100+4*i)*BEAT-OFFSET,25+50*Math.floor(11*Math.random()));
+
+new Bomb((132)*BEAT-OFFSET,75,75);
+new Bomb((136)*BEAT-OFFSET,675,475);
+new Bomb((140)*BEAT-OFFSET,675,75);
+new Bomb((144)*BEAT-OFFSET,75,475);
+
+new RotatingBeam((143.5)*BEAT-OFFSET,16/BPS,Math.PI/4,Math.PI);
+new RotatingBeam((151.5)*BEAT-OFFSET,16/BPS,-Math.PI/4,-Math.PI);
+
+new Bomb((164)*BEAT-OFFSET,75,75);
+new Bomb((168)*BEAT-OFFSET,675,475);
+new Bomb((172)*BEAT-OFFSET,675,75);
+new Bomb((176)*BEAT-OFFSET,75,475);
+
+new RotatingBeam((175.5)*BEAT-OFFSET,16/BPS,Math.PI/4,Math.PI);
+new RotatingBeam((175.5)*BEAT-OFFSET,16/BPS,-Math.PI/4,Math.PI);
+
+
+for(let i=0;i<8;i++)
+	new VerticalBeam((204+4*i)*BEAT-OFFSET,50+50*Math.floor(15*Math.random()),2*grid.side);
+
+for(let i=0;i<4;i++) {
+	new Bomb((236+8*i)*BEAT-OFFSET,25+50*Math.floor(15*Math.random()),475);
+	new VerticalBeam((240+8*i)*BEAT-OFFSET,25+50*Math.floor(15*Math.random()));
+	new VerticalBeam((240+8*i)*BEAT-OFFSET,25+50*Math.floor(15*Math.random()));
+}
+
+for(let i=0;i<28+20;i++)
+	new SquareAttack((271+2*i)*BEAT-OFFSET,25+50*14*Math.random());
+for(let i=0;i<8;i++)
+	new HorizontalBeam((300+4*i)*BEAT-OFFSET,25+50*Math.floor(11*Math.random()));
+
+new Bomb((372)*BEAT-OFFSET,75,75);
+new Bomb((376)*BEAT-OFFSET,675,475);
+new Bomb((380)*BEAT-OFFSET,675,75);
+new Bomb((384)*BEAT-OFFSET,75,475);
+
+new RotatingBeam((383.5)*BEAT-OFFSET,16/BPS,Math.PI/4,Math.PI);
+new RotatingBeam((391.5)*BEAT-OFFSET,16/BPS,-Math.PI/4,-Math.PI);
+
+new Bomb((404)*BEAT-OFFSET,75,75);
+new Bomb((408)*BEAT-OFFSET,675,475);
+new Bomb((412)*BEAT-OFFSET,675,75);
+new Bomb((416)*BEAT-OFFSET,75,475);
+
+new RotatingBeam((415.5)*BEAT-OFFSET,16/BPS,Math.PI/4,Math.PI);
+new RotatingBeam((415.5)*BEAT-OFFSET,16/BPS,-Math.PI/4,Math.PI);
+
+function restart(){
+	for(attack of Attack.Attacks)
+		attack.generated = false;
+	widget.seekTo(0);
+	widget.play()
+}
+function calibchange(){
+	calib = document.getElementById('calibInput').value;
+}
+document.onkeydown = document.onclick = function(){
+	widget.play();
+	document.onkeydown = keydown;
+	document.onclick = keydown;
+}
+function keydown() {
+	var difX = 0;
+	var difY = 0;
+	if(player.angle < .25)
+		difX = player.posX < (grid.width-1);
+	else if (player.angle < .75)
+		difY = player.posY < (grid.height-1);
+	else if (player.angle < 1.25)
+		difX = -(player.posX > 0);
+	else if (player.angle < 1.75)
+		difY = -(player.posY > 0);
+	else
+		difX = player.posX < (grid.width-1);
+	player.posX += difX;
+	player.posY += difY;
+	if(difX || difY)
+		player.currPlanet ^= 1;
+}
+function gameOver(){
+	
+}
+</script>
+</html>
