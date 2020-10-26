@@ -472,7 +472,7 @@ function restart(){
 		trail.color = '#aaa';
 }
 function calibchange(){
-	calib = document.getElementById('calibInput').value;
+	calib = parseInt(document.getElementById('calibInput').value);
 }
 document.onkeydown = document.onclick = function(){
 	widget.play();
